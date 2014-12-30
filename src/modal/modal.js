@@ -87,11 +87,14 @@ angular.module('ui.bootstrap.modal', [])
     return {
       restrict: 'EA',
       scope: {
-        index: '@'
+        index: '@',
+        animate: '='
       },
       replace: true,
       transclude: true,
-      templateUrl: 'template/modal/window.html',
+      templateUrl: function(tElement, tAttrs) {
+        return tAttrs.templateUrl || 'template/modal/window.html';
+      },
       link: function (scope, element, attrs) {
         scope.windowClass = attrs.windowClass || '';
 
@@ -106,8 +109,8 @@ angular.module('ui.bootstrap.modal', [])
     };
   }])
 
-  .factory('$modalStack', ['$document', '$compile', '$rootScope', '$$stackedMap',
-    function ($document, $compile, $rootScope, $$stackedMap) {
+  .factory('$modalStack', ['$document', '$compile', '$rootScope', '$transition', '$timeout', '$$stackedMap',
+    function ($document, $compile, $rootScope, $transition, $timeout, $$stackedMap) {
 
       var OPENED_MODAL_CLASS = 'modal-open';
 
@@ -139,18 +142,49 @@ angular.module('ui.bootstrap.modal', [])
         //clean up the stack
         openedWindows.remove(modalInstance);
 
-        //remove window DOM element
-        modalWindow.modalDomEl.remove();
-        body.toggleClass(OPENED_MODAL_CLASS, openedWindows.length() > 0);
+        removeAfterAnimate(modalWindow.modalDomEl, modalWindow.modalScope, 1000, function() {
+          //remove window DOM element
+          modalWindow.modalDomEl.remove();
+          body.toggleClass(OPENED_MODAL_CLASS, openedWindows.length() > 0);
 
-        //remove backdrop if no longer needed
-        if (backdropDomEl && backdropIndex() == -1) {
-          backdropDomEl.remove();
-          backdropDomEl = undefined;
+          //remove backdrop if no longer needed
+          if (backdropDomEl && backdropIndex() == -1) {
+            backdropDomEl.remove();
+            backdropDomEl = undefined;
+          }
+
+          //destroy scope
+          modalWindow.modalScope.$destroy();
+
+        });
+      }
+
+      function removeAfterAnimate(domEl, scope, emulateTime, done) {
+        // Closing animation
+        scope.animate = false;
+        var transitionEndEventName = $transition.transitionEndEventName;
+        if (transitionEndEventName) {
+          // transition out
+          var timeout = $timeout(afterAnimating, emulateTime);
+          domEl.bind(transitionEndEventName, function () {
+            $timeout.cancel(timeout);
+            afterAnimating();
+            scope.$apply();
+          });
+        } else {
+          // Ensure this call is async
+          $timeout(afterAnimating);
         }
-
-        //destroy scope
-        modalWindow.modalScope.$destroy();
+        function afterAnimating() {
+          if (afterAnimating.done) {
+            return;
+          }
+          afterAnimating.done = true;
+          domEl.remove();
+          if (done) {
+            done();
+          }
+        }
       }
 
       $document.bind('keydown', function (evt) {
@@ -182,10 +216,12 @@ angular.module('ui.bootstrap.modal', [])
             backdropDomEl = $compile(backdropjqLiteEl)(backdropScope);
             body.append(backdropDomEl);
         }
-          
+
         var angularDomEl = angular.element('<div modal-window></div>');
         angularDomEl.attr('window-class', modal.windowClass);
+        angularDomEl.attr('template-url', modal.windowTemplateUrl);
         angularDomEl.attr('index', openedWindows.length() - 1);
+        angularDomEl.attr('animate', 'animate');
         angularDomEl.html(modal.content);
 
         var modalDomEl = $compile(angularDomEl)(modal.scope);
@@ -302,7 +338,8 @@ angular.module('ui.bootstrap.modal', [])
                 content: tplAndVars[0],
                 backdrop: modalOptions.backdrop,
                 keyboard: modalOptions.keyboard,
-                windowClass: modalOptions.windowClass
+                windowClass: modalOptions.windowClass,
+                windowTemplateUrl: modalOptions.windowTemplateUrl
               });
 
             }, function resolveError(reason) {
